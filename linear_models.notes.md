@@ -156,3 +156,18 @@ These conditions are rare in real-world data.
 ## Key Takeaway
 
 **SVD works in regression because it decomposes the problem into stable, interpretable directions and avoids inverting ill-conditioned matrices, while the normal equation amplifies numerical errors.**
+
+
+
+# Ridge Regression and Lasso Regression
+## What is Regularization
+Regularization is a statistical method to reduce errors caused by overfitting on training data. 
+
+## Ridge Regression
+Ridge regression—also known as L2 regularization—is one of several types of regularization for linear regression models. Ridge regression specifically corrects for multicollinearity in regression analysis. This is useful when developing machine learning models that have a large number of parameters, particularly if those parameters also have high weights.
+
+| Term       | Role                            |
+| ---------- | ------------------------------- |
+| Data loss  | Fits the data                   |
+| L2 penalty | Shrinks weights                 |
+| (\lambda)  | Controls bias–variance tradeoff |
