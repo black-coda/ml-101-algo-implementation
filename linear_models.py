@@ -431,6 +431,8 @@ class RidgeRegression:
         predicted_y = self.X @ self.theta
         differences = predicted_y - self.y
         mse = (differences.T @ differences) / (2 * m)
+
+        #! NOTE:
         # The intercept represents the average value of your target when all features are zero. If you penalize the intercept, you are essentially telling the model, "I want the average value of my prediction to be zero." This doesn't help prevent overfitting; it just makes your model objectively less accurate by shifting the baseline. We only want to penalize the slopes (the relationship between features and the target).
         ridge_penalty = (self.alpha / (2 * m)) * np.sum(self.theta[1:] ** 2)
         return mse + ridge_penalty
@@ -447,6 +449,20 @@ class RidgeRegression:
         # ridge_gradients[0] = 0
 
         return gradients + ridge_gradients
+
+    def closed_form_solution(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        m, n = X.shape
+        X_b = self._add_intercept(X)
+        # creates identity matrix of size (n+1)x(n+1)
+        # the closed-form solution (where A is the (n + 1) × (n + 1)
+        # identity matrix except with a 0 in the top-left cell, 
+        # corresponding to the bias term)
+        A = np.eye(n + 1) # this creates identity matrix of size (n+1)x(n+1)
+        A[0, 0] = 0  # No regularization for intercept, this is the bias term
+        theta_closed_form = np.linalg.inv(
+            X_b.T @ X_b + self.alpha * A
+        ) @ X_b.T @ y
+        return theta_closed_form
 
     def fit(
         self,
@@ -531,3 +547,18 @@ if __name__ == "__main__":
     print("\nSklearn Ridge:")
     print("Intercept:", sk_ridge.intercept_)
     print("Weights:", sk_ridge.coef_)
+
+
+    # Closed form comapriason for the Ridge Regression
+    theta_closed_form = my_ridge.closed_form_solution(X, y)
+    print("\nClosed-form solution parameters:")
+    print("Intercept:", theta_closed_form[0])
+    print("Weights:", theta_closed_form[1:])
+
+
+    # Compare predictions
+    ridge_closed_form = Ridge(alpha=1, solver="cholesky")
+    ridge_closed_form.fit(X, y)
+    print("\nSklearn Ridge (closed-form):")
+    print("Intercept:", ridge_closed_form.intercept_)
+    print("Weights:", ridge_closed_form.coef_)
