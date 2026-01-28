@@ -193,3 +193,250 @@ Lasso regression is a regularization technique that applies a penalty to prevent
 <!-- insert image -->
 ![Local Image](./lasso_grad.png)
 
+
+
+I’ll assume:
+
+* Linear model
+* Squared loss
+* L1 regularization
+* Intercept **not** regularized
+
+---
+
+# 1️⃣ Lasso objective (start from scratch)
+
+[
+J(\theta) ;=; \frac{1}{m}\sum_{i=1}^m (y_i - \hat{y}*i)^2 ;+; \lambda \sum*{j=1}^n |\theta_j|
+]
+
+Where:
+
+* (\hat{y} = X\theta)
+* (\theta_0) (intercept) is excluded
+* (m) = number of samples
+
+---
+
+# 2️⃣ Split loss into two parts
+
+### (A) MSE term
+
+[
+\frac{1}{m} | X\theta - y |_2^2
+]
+
+### (B) L1 penalty
+
+[
+\lambda \sum_{j=1}^n |\theta_j|
+]
+
+---
+
+# 3️⃣ Gradient of the MSE (smooth part)
+
+[
+\nabla_\theta \left( \frac{1}{m}|X\theta - y|^2 \right)
+=======================================================
+
+\frac{2}{m} X^T(X\theta - y)
+]
+
+### Code
+
+```python
+predicted_y = X @ theta
+residuals = predicted_y - y
+grad_mse = 2 / m * (X.T @ residuals)
+```
+
+---
+
+# 4️⃣ Gradient of the L1 term (non-smooth ⚠️)
+
+Derivative of absolute value:
+
+[
+\frac{d}{d\theta} |\theta|
+==========================
+
+\begin{cases}
++1 & \theta > 0 \
+-1 & \theta < 0 \
+[-1, 1] & \theta = 0
+\end{cases}
+]
+
+This is why it’s a **subgradient**, not a gradient.
+
+### Vector form
+
+[
+\nabla_\theta (\lambda |\theta|_1)
+==================================
+
+\lambda \cdot \text{sign}(\theta)
+]
+
+But:
+[
+\text{sign}(\theta_0) = 0
+]
+
+---
+
+### Code
+
+```python
+lasso_grad = alpha * np.sign(theta)
+lasso_grad[0] = 0   # do NOT penalize intercept
+```
+
+---
+
+# 5️⃣ Full gradient update (subgradient descent)
+
+[
+\theta \leftarrow \theta - \eta \left[
+\frac{2}{m} X^T(X\theta - y) + \lambda \cdot \text{sign}(\theta)
+\right]
+]
+
+### Code
+
+```python
+grad = grad_mse + lasso_grad
+theta -= lr * grad
+```
+
+---
+
+# 6️⃣ Cost function (for monitoring)
+
+### Math
+
+[
+J(\theta) =
+\frac{1}{m}(X\theta - y)^T(X\theta - y)
++
+\lambda \sum_{j=1}^n |\theta_j|
+]
+
+### Code
+
+```python
+mse = (1 / m) * (residuals.T @ residuals)
+lasso_penalty = alpha * np.sum(np.abs(theta[1:]))
+cost = mse + lasso_penalty
+```
+
+---
+
+# 7️⃣ Why coefficients become zero (intuition)
+
+When a weight is small:
+
+* MSE gradient pulls it slightly
+* L1 gradient applies **constant force** toward zero
+* Once near zero → it gets **stuck**
+
+This is the sparsity effect.
+
+---
+
+# 8️⃣ Why gradient descent is unstable near zero
+
+At (\theta = 0):
+
+[
+\text{sign}(0) \in [-1, 1]
+]
+
+In code:
+
+```python
+np.sign(0) == 0
+```
+
+But mathematically:
+
+* Any value in [-1, 1] is valid
+* Leads to oscillation
+* Learning rate sensitive
+
+This is why sklearn **does not** use GD.
+
+---
+
+# 9️⃣ The “correct” update (preview 👀)
+
+Coordinate descent solves **one weight at a time**:
+
+[
+\theta_j \leftarrow
+\text{soft-threshold}\left(
+\frac{1}{m} X_j^T r, \lambda
+\right)
+]
+
+Where:
+[
+\text{soft}(z, \lambda)
+=======================
+
+\begin{cases}
+z - \lambda & z > \lambda \
+0 & |z| \le \lambda \
+z + \lambda & z < -\lambda
+\end{cases}
+]
+
+We’ll derive this next if you want.
+
+---
+
+# 10️⃣ Summary (you should remember this)
+
+* Lasso ≠ Ridge mathematically
+* L1 → **subgradient**
+* Subgradient GD is valid but unstable
+* Sparsity comes from **constant pull to zero**
+* Coordinate descent exists *because* of non-differentiability
+
+---
+
+# Elastic Net
+Elastic Net is a middle ground between Ridge Regression and Lasso Regression. The
+regularization term is a simple mix of both Ridge and Lasso’s regularization terms,
+and you can control the mix ratio r. 
+
+- When r = 0, Elastic Net is equivalent to Ridge
+Regression,
+- when r = 1, it is equivalent to Lasso Regression
+- Ridge is a good default, but if you suspect that only a few features are actually useful, you should pre‐
+fer Lasso or Elastic Net since they tend to reduce the useless features’ weights down to
+zero as we have discussed.
+- In general, Elastic Net is preferred over Lasso since Lasso
+may behave erratically when the number of features is greater than the number of
+training instances or when several features are strongly correlated.
+
+## Why Elastic Net exists (intuition first)
+
+Elastic Net was created to fix two practical problems you run into with Lasso and Ridge in the real world:
+
+Lasso (L1) struggles when features are highly correlated
+
+It tends to pick one feature and ignore the rest (arbitrary selection)
+
+Ridge (L2) keeps all features
+
+No sparsity → no feature selection
+
+👉 Elastic Net combines both
+
+ - Ridge’s stability
+
+ - Lasso’s sparsity
+
+![Elastic-Net](./elastic-net.png)

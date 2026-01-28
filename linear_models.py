@@ -518,16 +518,16 @@ class LassoRegression:
         m = self.X.shape[0]
         predicted_y = self.X @ self.theta
         differences = predicted_y - self.y
-        mse = (differences.T @ differences) /  (2*m)
-        lasso_penalty = (self.alpha / (2 * m)) + np.sum(np.abs(self.theta[1:]))
+        mse = (differences.T @ differences) / (m)
+        lasso_penalty = (self.alpha) * np.sum(np.abs(self.theta[1:]))
         return mse + lasso_penalty
 
     def gradient_function(self) -> np.ndarray:
         m = self.y.shape[0]
         predicted_y = self.X @ self.theta
         differences = predicted_y - self.y
-        gradients = 1 / m * (self.X.T @ differences)
-        #
+        gradients = 2 / m * (self.X.T @ differences)
+        # here wwe calculate the subgradient for L1 regularization, not the exact gradient
         lasso_gradients = (self.alpha) * np.sign(self.theta)
         lasso_gradients[0] = 0  # No penalty for intercept
         return gradients + lasso_gradients
@@ -566,6 +566,86 @@ class LassoRegression:
 
         X_b = np.c_[np.ones((X.shape[0], 1)), X]
         return X_b @ self.theta
+
+class ElasticNetRegression:
+    
+    def __init__(self, alpha: float = 1.0, mixing_ratio: float = 0.5):
+        self.alpha = alpha
+        self.mixing_ratio = mixing_ratio
+        self.theta = None
+
+        self.X = None
+        self.y = None
+        self.mse_history = []
+
+    def _add_intercept(self, X: np.ndarray) -> np.ndarray:
+        if self.theta is None:
+            self.theta = np.zeros(X.shape[1] + 1)
+        return np.c_[np.ones((X.shape[0], 1)), X]
+    
+
+    def cost_function(self) -> float:
+        m = self.X.shape[0]
+        predicted_y = self.X @ self.theta
+        differences = predicted_y - self.y
+        mse = (differences.T @ differences) / (2 * m)
+
+        ridge_penalty = (self.alpha / (2 * m)) * np.sum(self.theta[1:] ** 2)
+        lasso_penalty = (self.alpha) * np.sum(np.abs(self.theta[1:]))
+        return mse + (1 - self.mixing_ratio) * ridge_penalty + self.mixing_ratio * lasso_penalty
+    
+    def gradient_function(self) -> np.ndarray:
+        m = self.y.shape[0]
+        predicted_y = self.X @ self.theta
+        differences = predicted_y - self.y
+        gradients =  (self.X.T @ differences) / (m)
+
+        # ridge_gradients = (self.alpha / m) * np.r_[0, self.theta[1:]] # No penalty for intercept
+        # lasso_gradients = (self.alpha) * np.sign(self.theta)
+        # lasso_gradients[0] = 0
+
+        ridge_grad = (1 - self.mixing_ratio) * np.r_[0, self.theta[1:]]
+        lasso_grad = self.mixing_ratio * np.r_[0, np.sign(self.theta[1:])]
+
+        return gradients + (self.alpha/m) * (ridge_grad + lasso_grad)
+    
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        lr: float = 0.01,
+        n_iter: int = 1000,
+        tol: float = 1e-5,
+    ) -> np.ndarray:
+        self.X = self._add_intercept(X)
+        self.y = y.ravel()
+        self.mse_history = []
+
+        for i in range(n_iter):
+            gradients = self.gradient_function()
+            self.theta -= lr * gradients
+
+            mse = self.cost_function()
+            self.mse_history.append(mse)
+            if (
+                len(self.mse_history) > 1
+                and abs(self.mse_history[-2] - self.mse_history[-1]) < tol
+            ):
+                break
+
+        return self.theta
+    
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        if self.theta is None:
+            raise ValueError(
+                "Model must be fitted before making predictions. " "Call fit() first."
+            )
+
+        X_b = np.c_[np.ones((X.shape[0], 1)), X]
+        return X_b @ self.theta
+
+        
 
 
 if __name__ == "__main__":
@@ -625,3 +705,19 @@ if __name__ == "__main__":
     print("\nSklearn Lasso:")
     print("Intercept:", sk_lasso.intercept_)
     print("Weights:", sk_lasso.coef_)
+
+
+    # predictions for ElasticNet Regression
+    mixing_ratio = 0.5
+    my_elasticnet = ElasticNetRegression(alpha=alpha, mixing_ratio=mixing_ratio)
+    my_elasticnet.fit(X, y, lr=0.01, n_iter=5000, tol=0.0001)
+    print("\nMy ElasticNet model parameters:")
+    print("Intercept:", my_elasticnet.theta[0])
+    print("Weights:", my_elasticnet.theta[1:])
+
+    from sklearn.linear_model import ElasticNet
+    sk_elasticnet = ElasticNet(alpha=alpha, l1_ratio=mixing_ratio, fit_intercept=True, max_iter=5000, tol=0.0001)
+    sk_elasticnet.fit(X, y)
+    print("\nSklearn ElasticNet:")
+    print("Intercept:", sk_elasticnet.intercept_)
+    print("Weights:", sk_elasticnet.coef_)
