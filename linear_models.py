@@ -455,13 +455,11 @@ class RidgeRegression:
         X_b = self._add_intercept(X)
         # creates identity matrix of size (n+1)x(n+1)
         # the closed-form solution (where A is the (n + 1) × (n + 1)
-        # identity matrix except with a 0 in the top-left cell, 
+        # identity matrix except with a 0 in the top-left cell,
         # corresponding to the bias term)
-        A = np.eye(n + 1) # this creates identity matrix of size (n+1)x(n+1)
+        A = np.eye(n + 1)  # this creates identity matrix of size (n+1)x(n+1)
         A[0, 0] = 0  # No regularization for intercept, this is the bias term
-        theta_closed_form = np.linalg.inv(
-            X_b.T @ X_b + self.alpha * A
-        ) @ X_b.T @ y
+        theta_closed_form = np.linalg.inv(X_b.T @ X_b + self.alpha * A) @ X_b.T @ y
         return theta_closed_form
 
     def fit(
@@ -511,11 +509,63 @@ class LassoRegression:
         self.theta = None
         self.mse_history = []
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
-        pass
+    def _add_intercept(self, X: np.ndarray) -> np.ndarray:
+        if self.theta is None:
+            self.theta = np.zeros(X.shape[1] + 1)
+        return np.c_[np.ones((X.shape[0], 1)), X]
+
+    def cost_function(self):
+        m = self.X.shape[0]
+        predicted_y = self.X @ self.theta
+        differences = predicted_y - self.y
+        mse = (differences.T @ differences) /  (2*m)
+        lasso_penalty = (self.alpha / (2 * m)) + np.sum(np.abs(self.theta[1:]))
+        return mse + lasso_penalty
+
+    def gradient_function(self) -> np.ndarray:
+        m = self.y.shape[0]
+        predicted_y = self.X @ self.theta
+        differences = predicted_y - self.y
+        gradients = 1 / m * (self.X.T @ differences)
+        #
+        lasso_gradients = (self.alpha) * np.sign(self.theta)
+        lasso_gradients[0] = 0  # No penalty for intercept
+        return gradients + lasso_gradients
+
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        lr: float = 0.01,
+        n_iter: int = 1000,
+        tol: float = 1e-5,
+    ) -> np.ndarray:
+
+        self.X = self._add_intercept(X)
+        self.y = y.ravel()
+        self.mse_history = []
+
+        for i in range(n_iter):
+            gradients = self.gradient_function()
+            self.theta -= lr * gradients
+
+            mse = self.cost_function()
+            self.mse_history.append(mse)
+            if (
+                len(self.mse_history) > 1
+                and abs(self.mse_history[-2] - self.mse_history[-1]) < tol
+            ):
+                break
+        return self.theta
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        pass
+        if self.theta is None:
+            raise ValueError(
+                "Model must be fitted before making predictions. " "Call fit() first."
+            )
+
+        X_b = np.c_[np.ones((X.shape[0], 1)), X]
+        return X_b @ self.theta
 
 
 if __name__ == "__main__":
@@ -548,13 +598,11 @@ if __name__ == "__main__":
     print("Intercept:", sk_ridge.intercept_)
     print("Weights:", sk_ridge.coef_)
 
-
     # Closed form comapriason for the Ridge Regression
     theta_closed_form = my_ridge.closed_form_solution(X, y)
     print("\nClosed-form solution parameters:")
     print("Intercept:", theta_closed_form[0])
     print("Weights:", theta_closed_form[1:])
-
 
     # Compare predictions
     ridge_closed_form = Ridge(alpha=1, solver="cholesky")
@@ -562,3 +610,18 @@ if __name__ == "__main__":
     print("\nSklearn Ridge (closed-form):")
     print("Intercept:", ridge_closed_form.intercept_)
     print("Weights:", ridge_closed_form.coef_)
+
+    # Predictions for Lasso Regression
+    my_lasso = LassoRegression(alpha=alpha)
+    my_lasso.fit(X, y, lr=0.01, n_iter=5000, tol=0.0001)
+    print("\nMy Lasso model parameters:")
+    print("Intercept:", my_lasso.theta[0])
+    print("Weights:", my_lasso.theta[1:])
+
+    from sklearn.linear_model import Lasso
+
+    sk_lasso = Lasso(alpha=alpha, fit_intercept=True, max_iter=5000, tol=0.0001)
+    sk_lasso.fit(X, y)
+    print("\nSklearn Lasso:")
+    print("Intercept:", sk_lasso.intercept_)
+    print("Weights:", sk_lasso.coef_)

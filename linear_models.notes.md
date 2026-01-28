@@ -171,3 +171,25 @@ Ridge regression—also known as L2 regularization—is one of several types of 
 | Data loss  | Fits the data                   |
 | L2 penalty | Shrinks weights                 |
 | (\lambda)  | Controls bias–variance tradeoff |
+
+Note: The SGDRegressor in sklearn, can be set to use the Ridge regularization by setting the hyperparameter penalty=l2
+The penalty hyperparameter sets the type of regularization term to use. Specifying
+"l2" indicates that you want SGD to add a regularization term to the cost function
+equal to half the square of the ℓ2 norm of the weight vector: this is simply Ridge
+Regression.
+
+
+## Lasso Regression
+Lasso regression is a regularization technique that applies a penalty to prevent overfitting and enhance the accuracy of statistical models.
+
+- Lasso stands for Least Absolute Shrinkage and Selection Operator
+- Lasso Regression is also known as L-1 Regression
+- Larger values of lambda increase the penalty, shrinking more of the coefficients towards zero; this subsequently reduces the importance of (or altogether eliminates) some of the features from the model, resulting in automatic feature selection. Conversely, smaller values of lambda reduce the effect of the penalty, retaining more features within the model.
+- In lasso regression, the hyperparameter lambda (λ), also known as the L1 penalty, balances the tradeoff between bias and variance in the resulting coefficients
+- As λ increases, the bias increases, and the variance decreases, leading to a simpler model with fewer parameters. Conversely, as λ decreases, the variance increases, leading to a more complex model with more parameters. If λ is zero, then one is left with an OLS function–that is, a standard linear regression model without any regularization.
+
+
+## Gradient of the regularization
+<!-- insert image -->
+![Local Image](./lasso_grad.png)
+
