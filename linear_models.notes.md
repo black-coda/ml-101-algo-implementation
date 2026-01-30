@@ -440,3 +440,7 @@ No sparsity → no feature selection
  - Lasso’s sparsity
 
 ![Elastic-Net](./elastic-net.png)
+
+
+
+### Error = Regression error + (regularization-factot) * Regularization term
