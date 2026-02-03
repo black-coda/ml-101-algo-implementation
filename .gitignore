@@ -1,1 +1,11 @@
 /.venv
+/projects/spam_classifier/datasets/
+/env/
+/__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
+*.log
+coverage
+datasets/
