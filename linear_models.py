@@ -1,6 +1,8 @@
 from typing import Optional, Union
 import numpy as np
 import pandas as pd
+from sklearn.discriminant_analysis import StandardScaler
+from sklearn.model_selection import train_test_split
 
 
 def normal_equation(X, y):
@@ -567,8 +569,9 @@ class LassoRegression:
         X_b = np.c_[np.ones((X.shape[0], 1)), X]
         return X_b @ self.theta
 
+
 class ElasticNetRegression:
-    
+
     def __init__(self, alpha: float = 1.0, mixing_ratio: float = 0.5):
         self.alpha = alpha
         self.mixing_ratio = mixing_ratio
@@ -582,7 +585,6 @@ class ElasticNetRegression:
         if self.theta is None:
             self.theta = np.zeros(X.shape[1] + 1)
         return np.c_[np.ones((X.shape[0], 1)), X]
-    
 
     def cost_function(self) -> float:
         m = self.X.shape[0]
@@ -592,13 +594,17 @@ class ElasticNetRegression:
 
         ridge_penalty = (self.alpha / (2 * m)) * np.sum(self.theta[1:] ** 2)
         lasso_penalty = (self.alpha) * np.sum(np.abs(self.theta[1:]))
-        return mse + (1 - self.mixing_ratio) * ridge_penalty + self.mixing_ratio * lasso_penalty
-    
+        return (
+            mse
+            + (1 - self.mixing_ratio) * ridge_penalty
+            + self.mixing_ratio * lasso_penalty
+        )
+
     def gradient_function(self) -> np.ndarray:
         m = self.y.shape[0]
         predicted_y = self.X @ self.theta
         differences = predicted_y - self.y
-        gradients =  (self.X.T @ differences) / (m)
+        gradients = (self.X.T @ differences) / (m)
 
         # ridge_gradients = (self.alpha / m) * np.r_[0, self.theta[1:]] # No penalty for intercept
         # lasso_gradients = (self.alpha) * np.sign(self.theta)
@@ -607,8 +613,7 @@ class ElasticNetRegression:
         ridge_grad = (1 - self.mixing_ratio) * np.r_[0, self.theta[1:]]
         lasso_grad = self.mixing_ratio * np.r_[0, np.sign(self.theta[1:])]
 
-        return gradients + (self.alpha/m) * (ridge_grad + lasso_grad)
-    
+        return gradients + (self.alpha / m) * (ridge_grad + lasso_grad)
 
     def fit(
         self,
@@ -635,7 +640,7 @@ class ElasticNetRegression:
                 break
 
         return self.theta
-    
+
     def predict(self, X: np.ndarray) -> np.ndarray:
         if self.theta is None:
             raise ValueError(
@@ -645,7 +650,373 @@ class ElasticNetRegression:
         X_b = np.c_[np.ones((X.shape[0], 1)), X]
         return X_b @ self.theta
 
-        
+
+class BGDSoftmaxRegression:
+    def __init__(
+        self,
+        learning_rate=0.1,
+        max_epochs=1000,
+        patience=10,
+        tolerance=1e-4,
+        random_state=None,
+    ):
+        """
+        Initialize Softmax Regression with Batch Gradient Descent and Early Stopping
+
+        Parameters:
+        -----------
+        learning_rate : float
+            Step size for gradient descent
+        max_epochs : int
+            Maximum number of training iterations
+        patience : int
+            Number of epochs to wait for improvement before stopping
+        tolerance : float
+            Minimum improvement to reset patience counter
+        random_state : int
+            Seed for reproducibility
+        """
+        self.learning_rate = learning_rate
+        self.max_epochs = max_epochs
+        self.patience = patience
+        self.tolerance = tolerance
+        self.random_state = random_state
+
+        # These will be initialized during training
+        self.Theta = None  # Weight matrix: shape (n_features + 1, n_classes)
+        self.classes_ = None  # Unique class labels
+        self.n_classes = None  # Number of classes
+        self.loss_history = {"train": [], "val": []}  # Track losses
+        self.scaler = None
+
+    def _compute_logits(self, X):
+        # print(f"X shape: {X.shape}, theta/weight shape: {self.Theta.shape}")
+        return X @ self.Theta
+
+    def _add_bias(self, X):
+        """
+        Add bias term (column of ones) to feature matrix
+
+        Pointer:
+        --------
+        - Use np.hstack or np.c_
+        - Returns X with shape (n_samples, n_features + 1)
+        """
+        return np.c_[np.ones((X.shape[0], 1)), X]
+
+    def _one_hot_encode(self, y):
+        """
+        Convert class labels to one-hot encoded matrix
+
+        Pointer:
+        --------
+        - First, map labels to indices 0..K-1 using self.classes_
+        - Create zero matrix of shape (n_samples, n_classes)
+        - Use integer indexing: Y_one_hot[np.arange(n_samples), y_indices] = 1
+        """
+        y_indices = np.searchsorted(self.classes_, y)
+        eyes = np.eye(self.n_classes)
+        return eyes[y_indices]
+
+    def _stable_softmax(self, logits):
+        """
+        Compute softmax in a numerically stable way
+
+        Pointer:
+        --------
+        - For each row: logits_shifted = logits - max(logits, axis=1, keepdims=True)
+        - exp_logits = np.exp(logits_shifted)
+        - softmax = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+        - Returns probabilities matrix of shape (n_samples, n_classes)
+        """
+        logits_shifted = logits - np.max(logits, axis=1, keepdims=True)
+        exp_logits = np.exp(logits_shifted)
+        return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+
+    def _compute_loss(self, logits, y_one_hot):
+        """
+        Compute cross-entropy loss
+
+        Pointer:
+        --------
+        - Use the log-sum-exp trick: log_sum_exp = np.log(np.sum(np.exp(logits_shifted), axis=1))
+        - Or compute via: log_probs = logits - log_sum_exp.reshape(-1, 1)
+        - Loss = -np.mean(y_one_hot * log_probs)
+        - Alternative: Use np.take_along_axis to get logits of true class directly
+        """
+        # 1. Stabilize logits
+        logits_shifted = logits - np.max(logits, axis=1, keepdims=True)
+
+        # 2. Compute log-sum-exp
+        log_sum_exp = np.log(np.sum(np.exp(logits_shifted), axis=1, keepdims=True))
+
+        # 3. Compute log-softmax
+        log_probs = logits_shifted - log_sum_exp
+
+        # 4. Cross-entropy
+        return -np.mean(np.sum(y_one_hot * log_probs, axis=1))
+
+    def _compute_gradient(self, X_with_bias, logits, y_one_hot):
+        """
+        Compute gradient of cross-entropy loss with respect to Theta
+
+        Pointer:
+        --------
+        - First compute probabilities using _stable_softmax(logits)
+        - Error = probabilities - y_one_hot
+        - Gradient = (X_with_bias.T @ error) / n_samples
+        - Returns gradient matrix same shape as Theta
+        """
+        m = X_with_bias.shape[0]
+        probabilities = self._stable_softmax(logits)
+        error = probabilities - y_one_hot
+        return (X_with_bias.T @ error) / m
+
+    def fit_for_comparison(
+        self, X_train, y_train_hot, X_val, y_validate_hot, verbose=True
+    ):
+        """
+        Fit method for comparison with sklearn's LogisticRegression
+
+        Pointer:
+        --------
+        - Similar to fit(), but takes pre-split train/val data
+        - No early stopping logic here, just one pass of gradient
+        - Returns self for chaining
+        """
+        self.classes_ = np.unique(y)
+        self.n_classes = len(self.classes_)
+        X_train_with_bias = self._add_bias(X_train)
+        X_validate_with_bias = self._add_bias(X_val)
+        self.Theta = self._initialize_weights(
+            X_train_with_bias.shape[1] - 1, self.n_classes
+        )
+        best_val_loss = float("inf")
+        patience_counter = 0
+
+        for epoch in range(self.max_epochs):
+            logits_train = self._compute_logits(X_train_with_bias)
+            grad = self._compute_gradient(X_train_with_bias, logits_train, y_train_hot)
+            self.Theta -= self.learning_rate * grad
+
+            # --- Compute losses ---
+            train_loss = self._compute_loss(logits_train, y_train_hot)
+
+            logits_val = self._compute_logits(X_validate_with_bias)
+            val_loss = self._compute_loss(logits_val, y_validate_hot)
+
+            # Store them
+            self.loss_history["train"].append(train_loss)
+            self.loss_history["val"].append(val_loss)
+
+            # --- Early stopping check ---
+            stop, best_val_loss, patience_counter = self._should_stop(
+                current_val_loss=val_loss,
+                best_val_loss=best_val_loss,
+                patience_counter=patience_counter,
+                epoch=epoch,
+            )
+
+            if verbose:
+                print(
+                    f"Epoch {epoch} - Train Loss: {train_loss:.4f}, "
+                    f"Val Loss: {val_loss:.4f}, Patience: {patience_counter}"
+                )
+
+            if stop:
+                if verbose:
+                    print("Early stopping triggered.")
+                break
+
+        return self
+
+    def fit(self, X, y, validation_split=0.2, verbose=False):
+        """
+        Train the model using Batch Gradient Descent with Early Stopping
+
+        # Input Data
+            X.shape = (m, n)          # m samples, n features
+            # Example: (100, 4) ← 100 iris flowers, 4 measurements each
+
+            # Parameters
+            W.shape = (n, K)          # n features, K classes
+            b.shape = (K,)            # K biases (one per class)
+            # Example: (4, 3) ← 4 features, 3 iris species
+
+            # Forward Pass
+            Z = X @ W + b            # (m, n) × (n, K) = (m, K)
+            # Z.shape = (100, 3) ← scores for each sample for each class
+
+            # Softmax Activation
+            Y_hat = softmax(Z)       # (m, K)
+            # Y_hat.shape = (100, 3) ← probabilities for each sample for each class
+
+            # True Labels (One-Hot Encoded)
+            Y.shape = (m, K)         # One-hot encoded true labels
+            # Example: if sample 0 is class 1 → [0, 1, 0]
+            # Y.shape = (100, 3)
+
+            # Gradient Computation
+            dZ = Y_hat - Y           # (m, K) - (m, K) = (m, K)
+            # Error for each sample for each class
+
+            dW = X.T @ dZ           # (n, m) × (m, K) = (n, K)
+            # Gradient for weight matrix
+
+        Pointer:
+        --------
+        1. Store unique classes and determine n_classes
+        2. Add bias to X
+        3. Split data into train/validation sets
+        4. Convert y_train, y_val to one-hot
+        5. Initialize Theta: small random values (np.random.randn)
+        6. Training loop:
+           - Forward pass (compute logits, loss)
+           - Backward pass (compute gradient)
+           - Update Theta
+           - Validation check
+           - Early stopping logic
+        """
+        self.classes_ = np.unique(y)
+        self.n_classes = len(self.classes_)
+        # Split data
+        X_train, X_validate, y_train, y_validate = train_test_split(
+            X, y, test_size=validation_split, random_state=42
+        )
+
+        # Scale features (important for gradient descent!)
+        scaler = StandardScaler()
+        self.scaler = scaler  # Store scaler for later use in predict
+        X_train = scaler.fit_transform(X_train)
+        X_validate = scaler.transform(X_validate)
+
+        X_train_with_bias = self._add_bias(X_train)
+        X_validate_with_bias = self._add_bias(X_validate)
+
+        # one-hot encode
+        y_train_hot = self._one_hot_encode(y_train)
+        y_validate_hot = self._one_hot_encode(y_validate)
+        self.Theta = self._initialize_weights(
+            X_train_with_bias.shape[1] - 1, self.n_classes
+        )
+        best_val_loss = float("inf")
+        patience_counter = 0
+
+        for epoch in range(self.max_epochs):
+            logits_train = self._compute_logits(X_train_with_bias)
+            grad = self._compute_gradient(X_train_with_bias, logits_train, y_train_hot)
+            self.Theta -= self.learning_rate * grad
+
+            # --- Compute losses ---
+            train_loss = self._compute_loss(logits_train, y_train_hot)
+
+            logits_val = self._compute_logits(X_validate_with_bias)
+            val_loss = self._compute_loss(logits_val, y_validate_hot)
+
+            # Store them
+            self.loss_history["train"].append(train_loss)
+            self.loss_history["val"].append(val_loss)
+
+            # --- Early stopping check ---
+            stop, best_val_loss, patience_counter = self._should_stop(
+                current_val_loss=val_loss,
+                best_val_loss=best_val_loss,
+                patience_counter=patience_counter,
+                epoch=epoch,
+            )
+
+            if verbose:
+                print(
+                    f"Epoch {epoch} - Train Loss: {train_loss:.4f}, "
+                    f"Val Loss: {val_loss:.4f}, Patience: {patience_counter}"
+                )
+
+            if stop:
+                if verbose:
+                    print("Early stopping triggered.")
+                break
+
+        return self
+
+    def _should_stop(self, current_val_loss, best_val_loss, patience_counter, epoch):
+        """
+        Determine if training should stop
+
+        Pointer:
+        --------
+        - Return True if: patience_counter >= self.patience OR epoch >= self.max_epochs
+        - Update best_val_loss and patience_counter based on improvement
+        """
+        if (
+            current_val_loss < best_val_loss
+            and (best_val_loss - current_val_loss) > self.tolerance
+        ):
+            best_val_loss = current_val_loss
+            patience_counter = 0
+        else:
+            patience_counter += 1
+
+        stop = patience_counter >= self.patience or epoch >= self.max_epochs
+        return stop, best_val_loss, patience_counter
+
+    def predict_proba(self, X):
+        """
+        Predict class probabilities
+
+        Pointer:
+        --------
+        - Add bias to X
+        - Compute logits = X_with_bias @ self.Theta
+        - Apply _stable_softmax
+        - Returns probability matrix
+        """
+        X_with_bias = self._add_bias(X)
+        logits = X_with_bias @ self.Theta
+        return self._stable_softmax(logits)
+
+    def predict(self, X):
+        """
+        Predict class labels
+
+        Pointer:
+        --------
+        - Get probabilities using predict_proba
+        - argmax over classes
+        - Map back to original class labels using self.classes_
+        """
+        proba = self.predict_proba(X)
+        class_indices = np.argmax(proba, axis=1)
+        return self.classes_[class_indices]
+
+    def score(self, X, y):
+        """
+        Compute accuracy score
+
+        Pointer:
+        --------
+        - predictions = self.predict(X)
+        - accuracy = np.mean(predictions == y)
+        """
+        predictions = self.predict(X)
+        return np.mean(predictions == y)
+
+    def get_loss_history(self):
+        """
+        Return training and validation loss history
+        """
+        return self.loss_history
+
+    def _initialize_weights(self, n_features, n_classes):
+        """
+        Initialize weight matrix
+
+        Pointer:
+        --------
+        - Theta shape: (n_features + 1, n_classes)
+        - Use: np.random.randn(n_features + 1, n_classes) * 0.01 (n,K)
+        - Or Xavier initialization: scale = np.sqrt(2 / (n_features + n_classes))
+        """
+        return np.random.randn(n_features + 1, n_classes) * 0.01
 
 
 if __name__ == "__main__":
@@ -706,7 +1077,6 @@ if __name__ == "__main__":
     print("Intercept:", sk_lasso.intercept_)
     print("Weights:", sk_lasso.coef_)
 
-
     # predictions for ElasticNet Regression
     mixing_ratio = 0.5
     my_elasticnet = ElasticNetRegression(alpha=alpha, mixing_ratio=mixing_ratio)
@@ -716,7 +1086,14 @@ if __name__ == "__main__":
     print("Weights:", my_elasticnet.theta[1:])
 
     from sklearn.linear_model import ElasticNet
-    sk_elasticnet = ElasticNet(alpha=alpha, l1_ratio=mixing_ratio, fit_intercept=True, max_iter=5000, tol=0.0001)
+
+    sk_elasticnet = ElasticNet(
+        alpha=alpha,
+        l1_ratio=mixing_ratio,
+        fit_intercept=True,
+        max_iter=5000,
+        tol=0.0001,
+    )
     sk_elasticnet.fit(X, y)
     print("\nSklearn ElasticNet:")
     print("Intercept:", sk_elasticnet.intercept_)
