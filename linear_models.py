@@ -1019,6 +1019,9 @@ class BGDSoftmaxRegression:
         return np.random.randn(n_features + 1, n_classes) * 0.01
 
 
+
+
+
 if __name__ == "__main__":
     from sklearn.linear_model import Ridge
 
